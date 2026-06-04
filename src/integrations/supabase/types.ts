@@ -27,6 +27,10 @@ export type Database = {
           raw: Json | null
           source: string | null
           user_id: string
+          ai_score: number | null
+          lead_category: string | null
+          confidence_score: number | null
+          model_version: string | null
         }
         Insert: {
           company?: string | null
@@ -40,6 +44,10 @@ export type Database = {
           raw?: Json | null
           source?: string | null
           user_id: string
+          ai_score?: number | null
+          lead_category?: string | null
+          confidence_score?: number | null
+          model_version?: string | null
         }
         Update: {
           company?: string | null
@@ -53,6 +61,10 @@ export type Database = {
           raw?: Json | null
           source?: string | null
           user_id?: string
+          ai_score?: number | null
+          lead_category?: string | null
+          confidence_score?: number | null
+          model_version?: string | null
         }
         Relationships: []
       }

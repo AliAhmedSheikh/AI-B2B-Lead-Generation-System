@@ -1,5 +1,10 @@
 import { createStart, createMiddleware } from "@tanstack/react-start";
 
+// Must be set before any HTTPS fetch — fixes TLS cert verification failure in dev
+if (typeof process !== "undefined") {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 import { renderErrorPage } from "./lib/error-page";
 import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
 

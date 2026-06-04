@@ -1,3 +1,8 @@
+// Disable TLS certificate verification for dev — fixes UNABLE_TO_VERIFY_LEAF_SIGNATURE
+// when the local Node.js CA bundle doesn't include the Supabase intermediate cert.
+// Safe for local dev; never deploy with this set in production.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
