@@ -98,6 +98,49 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_scores: {
+        Row: {
+          id: string
+          user_id: string
+          contact_id: string
+          ai_score: number
+          lead_category: string
+          confidence_score: number
+          model_version: string
+          features: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          contact_id: string
+          ai_score: number
+          lead_category: string
+          confidence_score: number
+          model_version?: string
+          features?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          contact_id?: string
+          ai_score?: number
+          lead_category?: string
+          confidence_score?: number
+          model_version?: string
+          features?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_scores_contact_id_fkey"
+            columns: ["contact_id"]
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never

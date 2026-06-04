@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { classifyImportedContacts } from "@/lib/ai/pipeline";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -125,6 +126,16 @@ export const importContacts = createServerFn({ method: "POST" })
 
     if (logError) {
       console.error("Failed to write import log", logError);
+    }
+
+    // Trigger AI classification pipeline for newly imported contacts
+    if (status === "completed" && inserted > 0) {
+      try {
+        await classifyImportedContacts({ data: { importLogId: log?.id ?? undefined } });
+      } catch (pipelineErr) {
+        // Non-fatal — import still succeeded; scoring can be retried from dashboard
+        console.error("[AI Pipeline] Post-import classification failed:", pipelineErr);
+      }
     }
 
     return {
