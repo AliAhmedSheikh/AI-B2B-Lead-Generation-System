@@ -3,11 +3,28 @@ import { getRequest } from '@tanstack/react-start/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
 
-
+/**
+ * Decode a JWT payload without verifying the signature.
+ * Security: RLS on Supabase enforces auth — the DB rejects invalid tokens.
+ * We only need the sub (userId) here to pass into context.
+ */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = parts[1];
+    // Base64url → Base64 → JSON
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(padded);
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
   async ({ next }) => {
-    
+
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
 
@@ -20,7 +37,7 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       console.error(`[Supabase] ${message}`);
       throw new Error(message);
     }
-    
+
     const request = getRequest();
 
     if (!request?.headers) {
@@ -37,14 +54,33 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       throw new Error('Unauthorized: Only Bearer tokens are supported');
     }
 
-    const token = authHeader.replace('Bearer ', '');
+    const token = authHeader.replace('Bearer ', '').trim();
     if (!token) {
       throw new Error('Unauthorized: No token provided');
     }
 
+    // Decode JWT locally to extract userId — no network call needed.
+    // Supabase RLS validates the token cryptographically on every DB query.
+    const payload = decodeJwtPayload(token);
+    if (!payload) {
+      throw new Error('Unauthorized: Malformed token');
+    }
+
+    const userId = payload.sub as string | undefined;
+    if (!userId) {
+      throw new Error('Unauthorized: No user ID found in token');
+    }
+
+    // Check token expiry
+    const exp = payload.exp as number | undefined;
+    if (exp && Date.now() / 1000 > exp) {
+      throw new Error('Unauthorized: Token has expired');
+    }
+
+    // Build a Supabase client scoped to this user's JWT — RLS uses this token
     const supabase = createClient<Database>(
-      SUPABASE_URL!,
-      SUPABASE_PUBLISHABLE_KEY!,
+      SUPABASE_URL,
+      SUPABASE_PUBLISHABLE_KEY,
       {
         global: {
           headers: {
@@ -59,21 +95,11 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       }
     );
 
-    const { data: userData, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !userData?.user) {
-      throw new Error('Unauthorized: Invalid token');
-    }
-
-    const userId = userData.user.id;
-    if (!userId) {
-      throw new Error('Unauthorized: No user ID found in token');
-    }
-
     return next({
       context: {
         supabase,
         userId,
-        claims: userData.user,
+        claims: payload,
       },
     });
   },

@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { importContacts } from "@/lib/import.functions";
 import { getLeads, reprocessLead } from "@/lib/api/leads.functions";
@@ -10,11 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
-  Upload, LogOut, Mail, FileCheck2, Flame, Thermometer,
+  Upload, LogOut, Mail, Flame, Thermometer,
   Snowflake, RefreshCw, Cpu, RotateCcw, Copy,
 } from "lucide-react";
 import type { LeadWithScore } from "@/lib/api/leads.functions";
@@ -78,10 +76,6 @@ function scoreBar(score: number) {
 // ---------------------------------------------------------------------------
 function Dashboard() {
   const navigate = useNavigate();
-  const runImport        = useServerFn(importContacts);
-  const runGetLeads      = useServerFn(getLeads);
-  const runReprocess     = useServerFn(reprocessLead);
-  const runClassifyAll   = useServerFn(classifyAllContacts);
 
   const [userEmail, setUserEmail]   = useState("");
   const [uploading, setUploading]   = useState(false);
@@ -99,7 +93,7 @@ function Dashboard() {
   const refresh = useCallback(async () => {
     const [logsRes, leadsRes, countRes] = await Promise.all([
       supabase.from("import_logs").select("*").order("created_at", { ascending: false }).limit(10),
-      runGetLeads({ data: { limit: 200, offset: 0 } }),
+      getLeads({ data: { limit: 200, offset: 0 } }),
       supabase.from("contacts").select("id", { count: "exact", head: true }),
     ]);
 
@@ -114,7 +108,7 @@ function Dashboard() {
       setScoreCounts(counts);
     }
     setTotalContacts(countRes.count ?? 0);
-  }, [runGetLeads]);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? ""));
@@ -156,7 +150,7 @@ function Dashboard() {
       const rows = await parseFile(file);
       if (rows.length === 0) { toast.error("No rows found in file"); return; }
       const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-      const result = await runImport({
+      const result = await importContacts({
         data: { fileName: file.name, fileType: ext === "csv" ? "csv" : "xlsx", rows },
       });
       if (result.status === "failed") {
@@ -178,7 +172,7 @@ function Dashboard() {
   const handleScoreAll = async () => {
     setScoring(true);
     try {
-      const result = await runClassifyAll({ data: {} });
+      const result = await classifyAllContacts({ data: {} });
       toast.success(`AI scored ${result.scored} leads in ${result.elapsedMs}ms`);
       await refresh();
     } catch (err) {
@@ -194,7 +188,7 @@ function Dashboard() {
   const handleReprocess = async (id: string) => {
     setReprocessingId(id);
     try {
-      const result = await runReprocess({ data: { id } });
+      const result = await reprocessLead({ data: { id } });
       toast.success(`Re-scored: ${result.leadCategory} (${result.aiScore})`);
       await refresh();
     } catch (err) {
@@ -508,6 +502,3 @@ function StatCard({
     </Card>
   );
 }
-
-// Keep Progress import used — suppress unused warning
-void Progress;
