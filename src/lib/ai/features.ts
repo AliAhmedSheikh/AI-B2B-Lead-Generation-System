@@ -128,27 +128,35 @@ export function extractFeatures(contact: RawContact): FeatureVector {
   const hasLastName = Boolean(contact.last_name?.trim());
   const hasCompany = Boolean(contact.company?.trim());
   const hasPhone = Boolean(
-    (contact.raw as Record<string, unknown> | null)?.[
-      Object.keys(contact.raw ?? {}).find((k) =>
-        ["phone", "phone_number", "mobile", "telephone"].includes(k.toLowerCase()),
-      ) ?? ""
-    ],
+    rawLower["phone"] ?? rawLower["phone_number"] ?? rawLower["mobile"] ??
+    rawLower["telephone"] ?? rawLower["tel"] ?? rawLower["cell"] ?? rawLower["phone number"] ?? ""
   );
 
   const keyFields = [hasFirstName, hasLastName, hasCompany, Boolean(email)];
   const completenessScore = keyFields.filter(Boolean).length / keyFields.length;
 
-  // Title seniority — look in raw fields for job_title, title, position etc.
+  // Title seniority — look in raw fields using all known column name variants
   const rawObj = (contact.raw ?? {}) as Record<string, unknown>;
-  const titleRaw =
-    String(
-      rawObj["title"] ??
-      rawObj["job_title"] ??
-      rawObj["position"] ??
-      rawObj["role"] ??
-      rawObj["designation"] ??
-      "",
-    ).toLowerCase();
+
+  // Build a lowercase key map for case-insensitive lookup
+  const rawLower: Record<string, string> = {};
+  for (const k of Object.keys(rawObj)) {
+    rawLower[k.toLowerCase().trim()] = String(rawObj[k] ?? "").trim();
+  }
+
+  const titleRaw = (
+    rawLower["title"] ??
+    rawLower["job_title"] ??
+    rawLower["job title"] ??
+    rawLower["decision maker title"] ??
+    rawLower["decision_maker_title"] ??
+    rawLower["position"] ??
+    rawLower["role"] ??
+    rawLower["designation"] ??
+    rawLower["function"] ??
+    rawLower["seniority"] ??
+    ""
+  ).toLowerCase();
 
   let titleSeniority: FeatureVector["titleSeniority"] = "unknown";
   let titleSeniorityScore = 0;
@@ -160,15 +168,16 @@ export function extractFeatures(contact: RawContact): FeatureVector {
     titleSeniorityScore = 0.5;
   }
 
-  // Industry — check company name + raw industry field
+  // Industry — check company name + raw industry/sector field (case-insensitive)
   const industryText = [
     contact.company ?? "",
-    String(rawObj["industry"] ?? ""),
-    String(rawObj["sector"] ?? ""),
+    rawLower["industry"] ?? "",
+    rawLower["sector"] ?? "",
+    rawLower["vertical"] ?? "",
+    rawLower["business type"] ?? "",
+    rawLower["business_type"] ?? "",
     emailDomain,
-  ]
-    .join(" ")
-    .toLowerCase();
+  ].join(" ").toLowerCase();
   const hasIndustryKeyword = HIGH_VALUE_INDUSTRIES.some((kw) =>
     industryText.includes(kw),
   );
@@ -185,15 +194,16 @@ export function extractFeatures(contact: RawContact): FeatureVector {
     sourceQualityScore = 0.1;
   }
 
-  // Geography — look in raw fields
+  // Geography — check all location-related columns (case-insensitive)
   const geoText = [
-    String(rawObj["country"] ?? ""),
-    String(rawObj["location"] ?? ""),
-    String(rawObj["region"] ?? ""),
-    String(rawObj["city"] ?? ""),
-  ]
-    .join(" ")
-    .toLowerCase();
+    rawLower["country"] ?? "",
+    rawLower["location"] ?? "",
+    rawLower["region"] ?? "",
+    rawLower["city"] ?? "",
+    rawLower["state"] ?? "",
+    rawLower["province"] ?? "",
+    rawLower["territory"] ?? "",
+  ].join(" ").toLowerCase();
   let geoTier: 0 | 1 | 2 = 0;
   let geoScore = 0;
   if ([...TIER1_GEO].some((g) => geoText.includes(g))) {

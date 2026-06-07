@@ -24,6 +24,37 @@ function pick(row: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
+// Extended list of email column name aliases found in real-world datasets
+const EMAIL_KEYS = [
+  "email", "e-mail", "mail", "email_address", "emailaddress",
+  "email address",          // ← this dataset uses "Email Address"
+  "work_email", "work email", "business_email", "business email",
+  "corporate_email", "contact_email", "primary_email",
+  "person_email", "user_email", "email1", "email_1", "email 1",
+  "electronic_mail", "e_mail", "emailid", "email_id",
+  "email id", "email-address", "email (work)", "work e-mail",
+];
+
+/**
+ * Find the email value in a row.
+ * 1. Try all known column name aliases (case-insensitive).
+ * 2. Auto-detect: scan all columns for the first value that looks like an email.
+ */
+function findEmail(row: Record<string, unknown>): string | null {
+  // Step 1: named aliases
+  const byName = pick(row, EMAIL_KEYS);
+  if (byName) return byName;
+
+  // Step 2: auto-detect any column whose value matches email pattern
+  for (const v of Object.values(row)) {
+    const s = String(v ?? "").trim().toLowerCase();
+    if (s && s.includes("@") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
+      return s;
+    }
+  }
+  return null;
+}
+
 export const importContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => ImportInput.parse(input))
@@ -43,7 +74,7 @@ export const importContacts = createServerFn({ method: "POST" })
     const normalized: Contact[] = [];
 
     for (const row of data.rows) {
-      const rawEmail = pick(row, ["email", "e-mail", "mail", "email_address"]);
+      const rawEmail = findEmail(row);
       if (!rawEmail) { invalid++; continue; }
       const email = rawEmail.toLowerCase();
       if (!emailRegex.test(email)) { invalid++; continue; }
@@ -51,12 +82,29 @@ export const importContacts = createServerFn({ method: "POST" })
       seen.add(email);
       normalized.push({
         user_id: userId, email,
-        first_name: pick(row, ["first_name", "firstname", "first name", "given_name"]),
-        last_name:  pick(row, ["last_name",  "lastname",  "last name",  "surname", "family_name"]),
-        company:    pick(row, ["company", "organization", "organisation", "employer", "company_name"]),
-        phone:      pick(row, ["phone", "phone_number", "mobile", "telephone"]),
-        source:     pick(row, ["source", "channel", "origin"]),
-        raw:        row,
+        // Name fields — support "Decision Maker Name", "Full Name", "Name", etc.
+        first_name: pick(row, [
+          "first_name", "firstname", "first name", "given_name", "fname", "first",
+          "decision maker name", "decision_maker_name", "contact name", "contact_name",
+          "full name", "full_name", "name", "person name", "person_name",
+        ]),
+        last_name: pick(row, [
+          "last_name", "lastname", "last name", "surname", "family_name", "lname", "last",
+        ]),
+        company: pick(row, [
+          "company", "organization", "organisation", "employer", "company_name",
+          "account_name", "account", "firm", "business", "business_name",
+          "company name", "organisation name", "organization name",
+        ]),
+        phone: pick(row, [
+          "phone", "phone_number", "mobile", "telephone", "tel", "cell",
+          "contact_number", "work_phone", "direct_phone", "phone1",
+          "phone number", "mobile number",
+        ]),
+        source: pick(row, [
+          "source", "channel", "origin", "lead_source", "referral", "lead source",
+        ]),
+        raw: row,
       });
     }
 
