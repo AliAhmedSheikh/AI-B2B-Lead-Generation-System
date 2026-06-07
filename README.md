@@ -9,7 +9,7 @@ A full-stack B2B lead management platform with an AI-powered classification engi
 ```
 Phase 0 → Data Ingestion Layer      ✅ Complete
 Phase 1 → AI Classification Layer   ✅ Complete
-Phase 2 → Lead Enrichment Layer     🔜 Planned
+Phase 2 → Lead Enrichment Layer     ✅ Complete
 Phase 3 → CRM Automation & Outreach 🔜 Planned
 ```
 
@@ -38,7 +38,19 @@ Phase 3 → CRM Automation & Outreach 🔜 Planned
 - Per-user data isolation via Supabase Row Level Security
 - Import history with inserted / duplicate / invalid counts
 
-### Phase 1 — AI Classification Engine
+### Phase 2 — Lead Enrichment Engine
+- **Domain extraction** — parses and validates company domains from email addresses
+- **Free data sources** — no API keys required:
+  - Clearbit Autocomplete API (company name, logo)
+  - Wikipedia Summary API (company description)
+  - Domain heuristics (industry keywords, country from TLD)
+- **Company intelligence**: name, website, industry, country, size, description, logo, LinkedIn/Twitter URLs
+- **Deduplication** — skips already-enriched contacts unless forced
+- **Bulk enrichment** — processes up to 20 contacts per batch with concurrency control
+- **Hot-only mode** — enrich only your best leads first
+- **Status tracking**: `pending` → `processing` → `completed` / `failed` / `skipped`
+- **Enrichment tab** — full company profile table with logos, links and descriptions
+- **Per-row enrich button** on leads table
 - **Feature Engineering** — extracts 8 weighted signals per contact:
   - Business vs free email domain
   - Corporate TLD detection

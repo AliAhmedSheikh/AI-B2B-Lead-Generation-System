@@ -153,6 +153,66 @@ export type Database = {
           }
         ]
       }
+      lead_enrichment: {
+        Row: {
+          id: string
+          user_id: string
+          contact_id: string
+          domain: string | null
+          company_name: string | null
+          website: string | null
+          industry: string | null
+          country: string | null
+          company_description: string | null
+          company_size: string | null
+          logo_url: string | null
+          linkedin_url: string | null
+          twitter_url: string | null
+          enrichment_status: string
+          enriched_at: string | null
+          error_message: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          contact_id: string
+          domain?: string | null
+          company_name?: string | null
+          website?: string | null
+          industry?: string | null
+          country?: string | null
+          company_description?: string | null
+          company_size?: string | null
+          logo_url?: string | null
+          linkedin_url?: string | null
+          twitter_url?: string | null
+          enrichment_status?: string
+          enriched_at?: string | null
+          error_message?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          contact_id?: string
+          domain?: string | null
+          company_name?: string | null
+          website?: string | null
+          industry?: string | null
+          country?: string | null
+          company_description?: string | null
+          company_size?: string | null
+          logo_url?: string | null
+          linkedin_url?: string | null
+          twitter_url?: string | null
+          enrichment_status?: string
+          enriched_at?: string | null
+          error_message?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
