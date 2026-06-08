@@ -94,7 +94,14 @@ function inferCompanySize(domain: string, companyName: string): string | null {
 /**
  * Enrich a single contact by email.
  */
-export async function enrichContact(email: string, existingCompany?: string | null): Promise<EnrichmentResult> {
+export async function enrichContact(email: string | null | undefined, existingCompany?: string | null): Promise<EnrichmentResult> {
+  if (!email) {
+    return {
+      domain: "", company_name: null, website: null, industry: null, country: null,
+      company_description: null, company_size: null, logo_url: null, linkedin_url: null, twitter_url: null,
+      enrichment_status: "skipped", error_message: "No email address",
+    };
+  }
   const domainInfo = extractDomain(email);
 
   // Skip free/personal email domains

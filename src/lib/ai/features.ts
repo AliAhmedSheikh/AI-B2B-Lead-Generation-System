@@ -127,13 +127,6 @@ export function extractFeatures(contact: RawContact): FeatureVector {
   const hasFirstName = Boolean(contact.first_name?.trim());
   const hasLastName = Boolean(contact.last_name?.trim());
   const hasCompany = Boolean(contact.company?.trim());
-  const hasPhone = Boolean(
-    rawLower["phone"] ?? rawLower["phone_number"] ?? rawLower["mobile"] ??
-    rawLower["telephone"] ?? rawLower["tel"] ?? rawLower["cell"] ?? rawLower["phone number"] ?? ""
-  );
-
-  const keyFields = [hasFirstName, hasLastName, hasCompany, Boolean(email)];
-  const completenessScore = keyFields.filter(Boolean).length / keyFields.length;
 
   // Title seniority — look in raw fields using all known column name variants
   const rawObj = (contact.raw ?? {}) as Record<string, unknown>;
@@ -143,6 +136,14 @@ export function extractFeatures(contact: RawContact): FeatureVector {
   for (const k of Object.keys(rawObj)) {
     rawLower[k.toLowerCase().trim()] = String(rawObj[k] ?? "").trim();
   }
+
+  const hasPhone = Boolean(
+    rawLower["phone"] ?? rawLower["phone_number"] ?? rawLower["mobile"] ??
+    rawLower["telephone"] ?? rawLower["tel"] ?? rawLower["cell"] ?? rawLower["phone number"] ?? ""
+  );
+
+  const keyFields = [hasFirstName, hasLastName, hasCompany, Boolean(email)];
+  const completenessScore = keyFields.filter(Boolean).length / keyFields.length;
 
   const titleRaw = (
     rawLower["title"] ??

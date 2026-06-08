@@ -38,3 +38,6 @@ dist-ssr
 
 # Internal workspace metadata
 .workspace/
+
+# Runtime data directory
+.data/

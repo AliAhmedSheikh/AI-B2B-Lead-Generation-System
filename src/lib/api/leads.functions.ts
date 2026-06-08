@@ -1,8 +1,3 @@
-/**
- * Lead API — reads ai_score, lead_category, confidence_score from contacts table directly.
- * No separate lead_scores table needed.
- */
-
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -26,9 +21,6 @@ export interface LeadWithScore {
   } | null;
 }
 
-// ---------------------------------------------------------------------------
-// GET /api/leads
-// ---------------------------------------------------------------------------
 export const getLeads = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
@@ -51,23 +43,27 @@ export const getLeads = createServerFn({ method: "GET" })
       throw new Error(`Failed to fetch leads: ${error.message}`);
     }
 
-    const leads: LeadWithScore[] = (rows ?? []).map((r) => ({
-      id:         r.id,
-      email:      r.email,
-      first_name: r.first_name,
-      last_name:  r.last_name,
-      company:    r.company,
-      source:     r.source,
-      created_at: r.created_at,
-      score: r.lead_category
-        ? {
-            ai_score:         r.ai_score as number,
-            lead_category:    r.lead_category as LeadCategory,
-            confidence_score: r.confidence_score as number,
-            model_version:    r.model_version as string,
-          }
-        : null,
-    }));
+    const leads: LeadWithScore[] = (rows ?? []).map((r) => {
+      const raw = (r.raw ?? {}) as Record<string, unknown>;
+      const score = raw._score as Record<string, unknown> | undefined;
+      return {
+        id:         r.id,
+        email:      r.email,
+        first_name: r.first_name,
+        last_name:  r.last_name,
+        company:    r.company,
+        source:     r.source,
+        created_at: r.created_at,
+        score: score?.lead_category
+          ? {
+              ai_score:         score.ai_score as number,
+              lead_category:    score.lead_category as LeadCategory,
+              confidence_score: score.confidence_score as number,
+              model_version:    score.model_version as string,
+            }
+          : null,
+      };
+    });
 
     aiLogger.info("getLeads", "Done", { count: leads.length });
     return { leads, total: leads.length };

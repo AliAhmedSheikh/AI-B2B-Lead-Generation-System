@@ -11,7 +11,7 @@ export const auth = {
     opts?: SignInOptions,
   ) => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider,
+      provider: provider as never,
       options: {
         redirectTo: opts?.redirect_uri ?? window.location.origin,
         queryParams: opts?.extraParams,

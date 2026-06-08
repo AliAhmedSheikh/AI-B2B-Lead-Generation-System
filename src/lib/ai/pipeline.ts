@@ -1,15 +1,9 @@
-/**
- * AI Classification Pipeline — Phase 1
- *
- * Classifies contacts and returns scores directly to the client.
- * Also attempts to persist scores to the DB (best-effort).
- */
-
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { classifyBatch, classifyContact, ACTIVE_MODEL } from "./classifier";
 import { aiLogger } from "./logger";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 type ContactRow = {
   id: string;
@@ -29,9 +23,15 @@ export type ScoredContact = {
   model_version: string;
 };
 
-// ---------------------------------------------------------------------------
-// classifyAllContacts — classify all, return scores, persist best-effort
-// ---------------------------------------------------------------------------
+function buildScorePayload(s: ScoredContact) {
+  return {
+    ai_score: s.ai_score,
+    lead_category: s.lead_category,
+    confidence_score: s.confidence_score,
+    model_version: s.model_version,
+  };
+}
+
 export const classifyAllContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({}))
@@ -58,7 +58,6 @@ export const classifyAllContacts = createServerFn({ method: "POST" })
       return { scores: [] as ScoredContact[], elapsed: 0 };
     }
 
-    // Run classifier
     const results = classifyBatch(contacts, ACTIVE_MODEL);
     const scores: ScoredContact[] = results.map((r, i) => ({
       id:               contacts[i].id,
@@ -68,19 +67,19 @@ export const classifyAllContacts = createServerFn({ method: "POST" })
       model_version:    r.modelVersion,
     }));
 
-    // Persist to DB best-effort (UPDATE contacts columns)
+    // Persist scores to contacts.raw JSONB column
     let persisted = 0;
     const CHUNK = 50;
     for (let i = 0; i < scores.length; i += CHUNK) {
       const chunk = scores.slice(i, i + CHUNK);
-      const updates = chunk.map((s) =>
-        supabase.from("contacts").update({
-          ai_score:         s.ai_score,
-          lead_category:    s.lead_category,
-          confidence_score: s.confidence_score,
-          model_version:    s.model_version,
-        }).eq("id", s.id)
-      );
+      const updates = chunk.map((s) => {
+        const contact = contacts.find((c) => c.id === s.id);
+        const existingRaw = (contact?.raw ?? {}) as Record<string, unknown>;
+        return (supabase as unknown as SupabaseClient)
+          .from("contacts")
+          .update({ raw: { ...existingRaw, _score: buildScorePayload(s) } } as never)
+          .eq("id", s.id);
+      });
       const settled = await Promise.allSettled(updates);
       persisted += settled.filter(
         (r) => r.status === "fulfilled" && !r.value.error
@@ -95,42 +94,32 @@ export const classifyAllContacts = createServerFn({ method: "POST" })
     return { scores, elapsed };
   });
 
-// ---------------------------------------------------------------------------
-// classifyImportedContacts — called post-import, scores unscored contacts
-// ---------------------------------------------------------------------------
 export const classifyImportedContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ importLogId: z.string().uuid().optional() }))
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
 
-    // Fetch contacts with no score yet
-    const { data, error } = await supabase
+    const { data: allContacts, error: fetchErr } = await supabase
       .from("contacts")
       .select("*")
-      .eq("user_id", userId)
-      .is("lead_category", null);
+      .eq("user_id", userId);
 
-    if (error) {
-      aiLogger.warn("pipeline", "Fetch unscored failed (columns may not exist yet)", { error: error.message });
-      // Columns don't exist yet — score all contacts instead
-      const { data: all } = await supabase
-        .from("contacts")
-        .select("*")
-        .eq("user_id", userId);
-      const contacts = (all ?? []) as ContactRow[];
-      if (!contacts.length) return { scores: [] as ScoredContact[], elapsed: 0 };
-      return runAndPersist(supabase, contacts);
+    if (fetchErr) {
+      aiLogger.warn("pipeline", "Fetch contacts failed", { error: fetchErr.message });
+      return { scores: [] as ScoredContact[], elapsed: 0 };
     }
 
-    const contacts = (data ?? []) as ContactRow[];
-    if (!contacts.length) return { scores: [] as ScoredContact[], elapsed: 0 };
-    return runAndPersist(supabase, contacts);
+    // Find unscored contacts (no _score in raw JSONB)
+    const unscored = ((allContacts ?? []) as ContactRow[]).filter((c) => {
+      const raw = (c.raw ?? {}) as Record<string, unknown>;
+      return !raw._score;
+    });
+
+    if (!unscored.length) return { scores: [] as ScoredContact[], elapsed: 0 };
+    return runAndPersist(supabase, unscored, userId);
   });
 
-// ---------------------------------------------------------------------------
-// reprocessSingleContact — classify one contact, return score
-// ---------------------------------------------------------------------------
 export const reprocessSingleContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ id: z.string().uuid() }))
@@ -155,25 +144,19 @@ export const reprocessSingleContact = createServerFn({ method: "POST" })
       model_version:    result.modelVersion,
     };
 
-    // Persist best-effort
-    await supabase.from("contacts").update({
-      ai_score:         score.ai_score,
-      lead_category:    score.lead_category,
-      confidence_score: score.confidence_score,
-      model_version:    score.model_version,
-    }).eq("id", score.id).then(({ error: e }) => {
-      if (e) aiLogger.warn("pipeline", "Persist failed (columns may not exist)", { error: e.message });
-    });
+    // Persist
+    const existingRaw = (contact.raw ?? {}) as Record<string, unknown>;
+    await (supabase as unknown as SupabaseClient).from("contacts").update({
+      raw: { ...existingRaw, _score: buildScorePayload(score) },
+    } as never).eq("id", score.id);
 
     return score;
   });
 
-// ---------------------------------------------------------------------------
-// Internal helper
-// ---------------------------------------------------------------------------
 async function runAndPersist(
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
+  supabase: SupabaseClient,
   contacts: ContactRow[],
+  userId: string,
 ): Promise<{ scores: ScoredContact[]; elapsed: number }> {
   const start = Date.now();
   const results = classifyBatch(contacts, ACTIVE_MODEL);
@@ -185,16 +168,14 @@ async function runAndPersist(
     model_version:    r.modelVersion,
   }));
 
-  // Persist best-effort
-  await Promise.allSettled(scores.map((s) =>
-    (supabase as ReturnType<typeof import("@supabase/supabase-js").createClient>)
-      .from("contacts").update({
-        ai_score: s.ai_score,
-        lead_category: s.lead_category,
-        confidence_score: s.confidence_score,
-        model_version: s.model_version,
-      }).eq("id", s.id)
-  ));
+  await Promise.allSettled(scores.map((s) => {
+    const contact = contacts.find((c) => c.id === s.id);
+    const existingRaw = (contact?.raw ?? {}) as Record<string, unknown>;
+    return (supabase as unknown as SupabaseClient)
+      .from("contacts")
+      .update({ raw: { ...existingRaw, _score: buildScorePayload(s) } } as never)
+      .eq("id", s.id);
+  }));
 
   return { scores, elapsed: Date.now() - start };
 }

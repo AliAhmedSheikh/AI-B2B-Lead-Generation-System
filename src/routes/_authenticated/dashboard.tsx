@@ -7,7 +7,7 @@ import { classifyAllContacts, reprocessSingleContact } from "@/lib/ai/pipeline";
 import { enrichLead, enrichBulk, getEnrichmentStats } from "@/lib/api/enrichment.functions";
 import type { ScoredContact } from "@/lib/ai/pipeline";
 import type { LeadWithScore } from "@/lib/api/leads.functions";
-import type { EnrichmentProfile } from "@/lib/api/enrichment.functions";
+import type { EnrichmentProfile, EnrichmentStatus } from "@/lib/api/enrichment.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import {
   Upload, LogOut, Mail, Flame, Thermometer, Snowflake,
   RefreshCw, Cpu, RotateCcw, Copy, Sparkles, Globe,
-  Building2, MapPin, Users, ExternalLink, Trash2, AlertCircle,
+  Building2, MapPin, Users, ExternalLink, Trash2, AlertCircle, FileText,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -113,14 +113,33 @@ function Dashboard() {
   const loadEnrichments = useCallback(async () => {
     const [stats, rows] = await Promise.all([
       getEnrichmentStats({ data: {} }).catch(() => ({ completed: 0, failed: 0, skipped: 0, pending: 0 })),
-      supabase.from("lead_enrichment").select("*").order("enriched_at", { ascending: false }).limit(200),
+      supabase.from("contacts").select("id, raw").not("raw", "is", null),
     ]);
     setEnrichStats(stats);
-    if (rows.data) {
-      const map: Record<string, EnrichmentProfile> = {};
-      for (const r of rows.data) map[r.contact_id] = r as EnrichmentProfile;
-      setEnrichments(map);
+    const map: Record<string, EnrichmentProfile> = {};
+    for (const r of rows.data ?? []) {
+      const raw = (r.raw ?? {}) as Record<string, unknown>;
+      const enr = raw._enrichment as Record<string, unknown> | undefined;
+      if (enr?.enrichment_status) {
+        map[r.id] = {
+          contact_id: r.id,
+          domain: (enr.domain as string) ?? null,
+          company_name: (enr.company_name as string) ?? null,
+          website: (enr.website as string) ?? null,
+          industry: (enr.industry as string) ?? null,
+          country: (enr.country as string) ?? null,
+          company_description: (enr.company_description as string) ?? null,
+          company_size: (enr.company_size as string) ?? null,
+          logo_url: (enr.logo_url as string) ?? null,
+          linkedin_url: (enr.linkedin_url as string) ?? null,
+          twitter_url: (enr.twitter_url as string) ?? null,
+          enrichment_status: enr.enrichment_status as EnrichmentStatus,
+          enriched_at: (enr.enriched_at as string) ?? null,
+          error_message: (enr.error_message as string) ?? null,
+        } as EnrichmentProfile;
+      }
     }
+    setEnrichments(map);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -307,6 +326,12 @@ function Dashboard() {
               <Button variant="outline" size="sm" onClick={() => handleEnrichAll(false)} disabled={enriching || !totalContacts}>
                 <Sparkles className={`size-4 mr-2 ${enriching ? "animate-pulse" : ""}`} />
                 {enriching ? "Enriching…" : "Enrich all"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/templates" })}>
+                <FileText className="size-4 mr-1" /> Templates
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/emails" })}>
+                <Mail className="size-4 mr-1" /> Emails
               </Button>
               <Button variant="ghost" size="sm" onClick={() => supabase.auth.signOut().then(() => navigate({ to: "/auth", replace: true }))}>
                 <LogOut className="size-4 mr-2" /> Sign out
@@ -596,7 +621,7 @@ function Dashboard() {
                         </TableHeader>
                         <TableBody>
                           {Object.values(enrichments).map(enr => (
-                            <TableRow key={enr.id}>
+                            <TableRow key={enr.contact_id}>
                               <TableCell className="font-mono text-xs text-muted-foreground">{enr.domain ?? "—"}</TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2">

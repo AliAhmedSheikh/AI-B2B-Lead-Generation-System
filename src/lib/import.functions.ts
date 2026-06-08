@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RowSchema = z.record(z.string(), z.any());
@@ -142,26 +143,27 @@ export const importContacts = createServerFn({ method: "POST" })
       logId = log?.id ?? null;
     } else {
       // Subsequent chunks — increment counters
-      await supabase.rpc("increment_import_log" as never, {
-        p_log_id:    logId,
-        p_inserted:  inserted,
-        p_dupes:     duplicates,
-        p_invalid:   invalid,
-        p_status:    isLastChunk ? status : "processing",
-      }).catch(() => {
+      try {
+        await (supabase as unknown as SupabaseClient).rpc("increment_import_log" as never, {
+          p_log_id:    logId,
+          p_inserted:  inserted,
+          p_dupes:     duplicates,
+          p_invalid:   invalid,
+          p_status:    isLastChunk ? status : "processing",
+        } as never);
+      } catch {
         // RPC may not exist — do a simple update instead
-        supabase.from("import_logs").select("inserted_count,duplicate_count,invalid_count")
-          .eq("id", logId!).single().then(({ data: cur }) => {
-            if (cur) {
-              supabase.from("import_logs").update({
-                inserted_count:  (cur.inserted_count  ?? 0) + inserted,
-                duplicate_count: (cur.duplicate_count ?? 0) + duplicates,
-                invalid_count:   (cur.invalid_count   ?? 0) + invalid,
-                status: isLastChunk ? status : "processing",
-              }).eq("id", logId!);
-            }
-          });
-      });
+        const { data: cur } = await supabase.from("import_logs").select("inserted_count,duplicate_count,invalid_count")
+          .eq("id", logId!).single();
+        if (cur) {
+          await supabase.from("import_logs").update({
+            inserted_count:  (cur.inserted_count  ?? 0) + inserted,
+            duplicate_count: (cur.duplicate_count ?? 0) + duplicates,
+            invalid_count:   (cur.invalid_count   ?? 0) + invalid,
+            status: isLastChunk ? status : "processing",
+          }).eq("id", logId!);
+        }
+      }
     }
 
     return {

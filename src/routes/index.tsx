@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { Upload, ShieldCheck, Sparkles } from "lucide-react";
+import { Upload, ShieldCheck, Sparkles, ArrowRight } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -11,8 +11,6 @@ export const Route = createFileRoute("/")({
         content:
           "Upload CSV or XLSX email lists. We validate, deduplicate, and prepare your contacts for AI-powered enrichment and scoring.",
       },
-      { property: "og:title", content: "Lead Pipeline" },
-      { property: "og:description", content: "Import emails. We clean, dedupe, and prep them for AI." },
     ],
   }),
   component: Landing,
@@ -22,27 +20,43 @@ function Landing() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
-        <span className="font-semibold">Lead Pipeline</span>
-        <Link to="/auth">
-          <Button size="sm">Sign in</Button>
-        </Link>
+        <span className="font-semibold tracking-tight">Lead Pipeline</span>
+        <div className="flex items-center gap-3">
+          <Link to="/auth">
+            <Button variant="ghost" size="sm">Sign in</Button>
+          </Link>
+          <Link to="/auth">
+            <Button size="sm">Get started</Button>
+          </Link>
+        </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-24 text-center">
-        <h1 className="text-5xl sm:text-6xl font-semibold tracking-tight">
-          Clean email leads,<br />ready for AI.
+      <main className="max-w-5xl mx-auto px-6 py-32 text-center">
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-sm text-muted-foreground mb-8">
+          <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+          AI-powered lead management
+        </div>
+
+        <h1 className="text-5xl sm:text-7xl font-bold tracking-tight leading-tight">
+          Clean email leads,<br />
+          <span className="text-gradient">ready for AI.</span>
         </h1>
-        <p className="mt-6 text-lg text-muted-foreground max-w-2xl mx-auto">
+        <p className="mt-6 text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
           Upload your raw CSV or XLSX. We validate, deduplicate, and store every contact in your
           private workspace — ready for the AI layer to enrich, score, and qualify.
         </p>
-        <div className="mt-10 flex items-center justify-center gap-3">
+        <div className="mt-10 flex items-center justify-center gap-4">
           <Link to="/auth">
-            <Button size="lg">Get started</Button>
+            <Button size="lg" className="gap-2">
+              Start importing <ArrowRight className="size-4" />
+            </Button>
+          </Link>
+          <Link to="/auth">
+            <Button variant="outline" size="lg">Learn more</Button>
           </Link>
         </div>
 
-        <div className="mt-20 grid sm:grid-cols-3 gap-6 text-left">
+        <div className="mt-28 grid sm:grid-cols-3 gap-4 text-left">
           <Feature icon={<Upload className="size-5" />} title="Upload anything">
             CSV and XLSX files. Flexible column mapping for email, name, company, phone.
           </Feature>
@@ -60,12 +74,12 @@ function Landing() {
 
 function Feature({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border p-5">
-      <div className="flex items-center gap-2 text-sm font-medium">
+    <div className="rounded-xl border bg-card p-6 card-hover">
+      <div className="size-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4 text-primary">
         {icon}
-        {title}
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">{children}</p>
+      <h3 className="text-sm font-semibold mb-2">{title}</h3>
+      <p className="text-sm text-muted-foreground leading-relaxed">{children}</p>
     </div>
   );
 }

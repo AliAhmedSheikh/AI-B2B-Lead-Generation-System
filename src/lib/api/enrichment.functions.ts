@@ -1,39 +1,12 @@
-/**
- * Lead Enrichment API — Phase 2
- *
- * GET  /api/leads/:id/enrichment     → getEnrichment()
- * POST /api/leads/:id/enrich         → enrichLead()
- * POST /api/leads/enrich/bulk        → enrichBulk()
- */
-
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { enrichContact } from "@/lib/enrichment/enricher";
 import { aiLogger } from "@/lib/ai/logger";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
-// ---------------------------------------------------------------------------
-// Schema cache helper — sends NOTIFY pgrst before first table access
-// ---------------------------------------------------------------------------
-async function reloadSchema(supabase: SupabaseClient) {
-  try {
-    await supabase.rpc("pg_notify" as never, { channel: "pgrst", payload: "reload schema" });
-    await new Promise(r => setTimeout(r, 800));
-  } catch { /* best-effort */ }
-}
-
-function isSchemaError(msg: string) {
-  return msg.includes("schema cache") || msg.includes("does not exist") || msg.includes("PGRST205");
-}
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 export type EnrichmentStatus = "pending" | "processing" | "completed" | "failed" | "skipped";
 
 export interface EnrichmentProfile {
-  id: string;
   contact_id: string;
   domain: string | null;
   company_name: string | null;
@@ -47,54 +20,46 @@ export interface EnrichmentProfile {
   twitter_url: string | null;
   enrichment_status: EnrichmentStatus;
   enriched_at: string | null;
-  created_at: string;
   error_message: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// Upsert helper with schema-cache retry
-// ---------------------------------------------------------------------------
-async function upsertEnrichment(
-  supabase: SupabaseClient,
-  row: Record<string, unknown>,
-): Promise<{ error: { message: string } | null }> {
-  const { error } = await supabase.from("lead_enrichment").upsert(row, { onConflict: "contact_id" });
-  if (error && isSchemaError(error.message)) {
-    await reloadSchema(supabase);
-    const retry = await supabase.from("lead_enrichment").upsert(row, { onConflict: "contact_id" });
-    return retry;
-  }
-  return { error };
+// Read enrichment from contacts.raw._enrichment
+function getEnrichmentFromContact(contact: Record<string, unknown>): EnrichmentProfile | null {
+  const raw = (contact.raw ?? {}) as Record<string, unknown>;
+  const enr = raw._enrichment as Record<string, unknown> | undefined;
+  if (!enr?.enrichment_status) return null;
+  return {
+    contact_id: contact.id as string,
+    domain: (enr.domain as string) ?? null,
+    company_name: (enr.company_name as string) ?? null,
+    website: (enr.website as string) ?? null,
+    industry: (enr.industry as string) ?? null,
+    country: (enr.country as string) ?? null,
+    company_description: (enr.company_description as string) ?? null,
+    company_size: (enr.company_size as string) ?? null,
+    logo_url: (enr.logo_url as string) ?? null,
+    linkedin_url: (enr.linkedin_url as string) ?? null,
+    twitter_url: (enr.twitter_url as string) ?? null,
+    enrichment_status: enr.enrichment_status as EnrichmentStatus,
+    enriched_at: (enr.enriched_at as string) ?? null,
+    error_message: (enr.error_message as string) ?? null,
+  };
 }
 
-// ---------------------------------------------------------------------------
-// GET /api/leads/:id/enrichment
-// ---------------------------------------------------------------------------
 export const getEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ contactId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    aiLogger.info("enrichment", "Fetching enrichment", { contactId: data.contactId });
-    await reloadSchema(supabase);
-
-    const { data: row, error } = await supabase
-      .from("lead_enrichment")
-      .select("*")
-      .eq("contact_id", data.contactId)
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("id, raw")
+      .eq("id", data.contactId)
       .eq("user_id", userId)
       .maybeSingle();
-
-    if (error) {
-      if (isSchemaError(error.message)) return { enrichment: null };
-      throw new Error(`Failed to fetch enrichment: ${error.message}`);
-    }
-    return { enrichment: row as EnrichmentProfile | null };
+    return { enrichment: contact ? getEnrichmentFromContact(contact) : null };
   });
 
-// ---------------------------------------------------------------------------
-// POST /api/leads/:id/enrich
-// ---------------------------------------------------------------------------
 export const enrichLead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
@@ -104,10 +69,7 @@ export const enrichLead = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const start = Date.now();
-    aiLogger.info("enrichment", "Enriching lead", { contactId: data.contactId });
-    await reloadSchema(supabase);
 
-    // Fetch contact
     const { data: contact, error: contactErr } = await supabase
       .from("contacts")
       .select("*")
@@ -117,27 +79,22 @@ export const enrichLead = createServerFn({ method: "POST" })
     if (contactErr || !contact) throw new Error("Contact not found");
 
     // Check existing enrichment
-    const { data: existing } = await supabase
-      .from("lead_enrichment")
-      .select("id, enrichment_status")
-      .eq("contact_id", data.contactId)
-      .maybeSingle();
-
+    const existing = getEnrichmentFromContact(contact);
     if (existing && !data.force &&
       (existing.enrichment_status === "completed" || existing.enrichment_status === "skipped")) {
-      aiLogger.info("enrichment", "Already enriched — skipping", { contactId: data.contactId });
       return { status: "already_enriched", contactId: data.contactId, result: null, elapsedMs: 0 };
     }
 
     // Mark processing
-    await upsertEnrichment(supabase, { user_id: userId, contact_id: data.contactId, enrichment_status: "processing" });
+    const raw = (contact.raw ?? {}) as Record<string, unknown>;
+    const updatedRaw = { ...raw, _enrichment: { ...(raw._enrichment as Record<string, unknown> ?? {}), enrichment_status: "processing" } };
+    await supabase.from("contacts").update({ raw: updatedRaw }).eq("id", data.contactId);
 
     // Run enrichment
     const result = await enrichContact(contact.email, contact.company);
 
-    // Persist
-    const upsertRow = {
-      user_id: userId, contact_id: data.contactId,
+    // Persist enrichment to raw._enrichment
+    const enrichmentData = {
       domain: result.domain, company_name: result.company_name,
       website: result.website, industry: result.industry,
       country: result.country, company_description: result.company_description,
@@ -146,26 +103,21 @@ export const enrichLead = createServerFn({ method: "POST" })
       enrichment_status: result.enrichment_status, error_message: result.error_message,
       enriched_at: new Date().toISOString(),
     };
-    const { error: upsertErr } = await upsertEnrichment(supabase, upsertRow);
+    const finalRaw = { ...raw, _enrichment: enrichmentData };
+    const { error: upsertErr } = await supabase.from("contacts").update({ raw: finalRaw }).eq("id", data.contactId);
 
     if (upsertErr) {
       aiLogger.error("enrichment", "Persist failed", { error: upsertErr.message });
-      // Return result anyway — data is useful even without DB storage
     }
 
-    // Also update contacts.company if empty
     if (result.enrichment_status === "completed" && result.company_name && !contact.company) {
       await supabase.from("contacts").update({ company: result.company_name }).eq("id", data.contactId);
     }
 
     const elapsed = Date.now() - start;
-    aiLogger.info("enrichment", "Enriched", { contactId: data.contactId, status: result.enrichment_status, elapsed });
     return { status: result.enrichment_status, contactId: data.contactId, result, elapsedMs: elapsed };
   });
 
-// ---------------------------------------------------------------------------
-// POST /api/leads/enrich/bulk
-// ---------------------------------------------------------------------------
 export const enrichBulk = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
@@ -176,89 +128,95 @@ export const enrichBulk = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const start = Date.now();
-    aiLogger.info("enrichment", "Bulk enrichment start", { userId, onlyHot: data.onlyHot });
-    await reloadSchema(supabase);
 
-    // Fetch contacts
-    let query = supabase.from("contacts").select("*").eq("user_id", userId);
-    if (data.onlyHot) query = query.eq("lead_category", "Hot");
-    const { data: allContacts, error: fetchErr } = await query;
+    const { data: allContacts, error: fetchErr } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("user_id", userId);
     if (fetchErr) throw new Error(`Failed to fetch contacts: ${fetchErr.message}`);
 
     let toEnrich = allContacts ?? [];
 
-    // Filter already-done unless forced
-    if (!data.force) {
-      const { data: done } = await supabase
-        .from("lead_enrichment")
-        .select("contact_id")
-        .eq("user_id", userId)
-        .in("enrichment_status", ["completed", "skipped"]);
-      if (done) {
-        const doneIds = new Set(done.map((r) => r.contact_id));
-        toEnrich = toEnrich.filter((c) => !doneIds.has(c.id));
-      }
+    // Filter hot leads if onlyHot is set
+    if (data.onlyHot) {
+      toEnrich = toEnrich.filter((c) => {
+        const raw = (c.raw ?? {}) as Record<string, unknown>;
+        const score = raw._score as Record<string, unknown> | undefined;
+        return score?.lead_category === "Hot";
+      });
     }
 
-    const batch = toEnrich.slice(0, data.batchSize);
-    aiLogger.info("enrichment", `Enriching batch of ${batch.length}`, { total: toEnrich.length });
+    // Filter already-done unless forced
+    if (!data.force) {
+      toEnrich = toEnrich.filter((c) => {
+        const enr = getEnrichmentFromContact(c);
+        return !enr || (enr.enrichment_status !== "completed" && enr.enrichment_status !== "skipped");
+      });
+    }
 
     let completed = 0, failed = 0, skipped = 0;
-
-    // Concurrency limit of 3
     const CONC = 3;
-    for (let i = 0; i < batch.length; i += CONC) {
-      const chunk = batch.slice(i, i + CONC);
-      const settled = await Promise.allSettled(
-        chunk.map(async (contact) => {
-          const result = await enrichContact(contact.email, contact.company);
-          const row = {
-            user_id: userId, contact_id: contact.id,
-            domain: result.domain, company_name: result.company_name,
-            website: result.website, industry: result.industry,
-            country: result.country, company_description: result.company_description,
-            company_size: result.company_size, logo_url: result.logo_url,
-            linkedin_url: result.linkedin_url, twitter_url: result.twitter_url,
-            enrichment_status: result.enrichment_status, error_message: result.error_message,
-            enriched_at: new Date().toISOString(),
-          };
-          await upsertEnrichment(supabase, row);
-          return result.enrichment_status;
-        }),
-      );
-      for (const r of settled) {
-        if (r.status === "fulfilled") {
-          if (r.value === "completed") completed++;
-          else if (r.value === "skipped") skipped++;
-          else failed++;
-        } else { failed++; }
+
+    // Process all contacts in batches of batchSize
+    for (let b = 0; b < toEnrich.length; b += data.batchSize) {
+      const batch = toEnrich.slice(b, b + data.batchSize);
+
+      for (let i = 0; i < batch.length; i += CONC) {
+        const chunk = batch.slice(i, i + CONC);
+        const settled = await Promise.allSettled(
+          chunk.map(async (contact) => {
+            const result = await enrichContact(contact.email, contact.company);
+            const raw = (contact.raw ?? {}) as Record<string, unknown>;
+            const enrichmentData = {
+              domain: result.domain, company_name: result.company_name,
+              website: result.website, industry: result.industry,
+              country: result.country, company_description: result.company_description,
+              company_size: result.company_size, logo_url: result.logo_url,
+              linkedin_url: result.linkedin_url, twitter_url: result.twitter_url,
+              enrichment_status: result.enrichment_status, error_message: result.error_message,
+              enriched_at: new Date().toISOString(),
+            };
+            await supabase.from("contacts").update({
+              raw: { ...raw, _enrichment: enrichmentData },
+            }).eq("id", contact.id);
+            return result.enrichment_status;
+          }),
+        );
+        for (const r of settled) {
+          if (r.status === "fulfilled") {
+            if (r.value === "completed") completed++;
+            else if (r.value === "skipped") skipped++;
+            else failed++;
+          } else { failed++; }
+        }
+        if (i + CONC < batch.length) await new Promise(r => setTimeout(r, 300));
       }
-      if (i + CONC < batch.length) await new Promise(r => setTimeout(r, 300));
+
+      // Small delay between batches
+      if (b + data.batchSize < toEnrich.length) await new Promise(r => setTimeout(r, 500));
     }
 
     const elapsed = Date.now() - start;
-    aiLogger.info("enrichment", "Bulk done", { completed, failed, skipped, elapsed });
-    return { total: batch.length, completed, failed, skipped, remaining: toEnrich.length - batch.length, elapsedMs: elapsed };
+    const total = completed + failed + skipped;
+    return { total, completed, failed, skipped, remaining: toEnrich.length - total, elapsedMs: elapsed };
   });
 
-// ---------------------------------------------------------------------------
-// GET enrichment stats
-// ---------------------------------------------------------------------------
 export const getEnrichmentStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({}))
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
-    const { data, error } = await supabase
-      .from("lead_enrichment")
-      .select("enrichment_status")
+    const { data } = await supabase
+      .from("contacts")
+      .select("raw")
       .eq("user_id", userId);
 
-    if (error) return { completed: 0, failed: 0, skipped: 0, pending: 0 };
     const counts = { completed: 0, failed: 0, skipped: 0, pending: 0 };
     for (const row of data ?? []) {
-      const s = row.enrichment_status as keyof typeof counts;
-      if (s in counts) counts[s]++;
+      const raw = (row.raw ?? {}) as Record<string, unknown>;
+      const enr = raw._enrichment as Record<string, unknown> | undefined;
+      const s = (enr?.enrichment_status as string) ?? "pending";
+      if (s in counts) (counts as Record<string, number>)[s]++;
     }
     return counts;
   });
