@@ -213,6 +213,91 @@ export type Database = {
         }
         Relationships: []
       }
+      templates: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          template_type: string
+          subject_template: string
+          body_template: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          template_type: string
+          subject_template?: string
+          body_template?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          template_type?: string
+          subject_template?: string
+          body_template?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      email_drafts: {
+        Row: {
+          id: string
+          user_id: string
+          contact_id: string
+          template_id: string
+          subject: string
+          email_body: string
+          generation_status: string
+          created_at: string
+          error_message: string | null
+          metadata: Json | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          contact_id: string
+          template_id: string
+          subject?: string
+          email_body?: string
+          generation_status?: string
+          created_at?: string
+          error_message?: string | null
+          metadata?: Json | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          contact_id?: string
+          template_id?: string
+          subject?: string
+          email_body?: string
+          generation_status?: string
+          created_at?: string
+          error_message?: string | null
+          metadata?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_drafts_contact_id_fkey"
+            columns: ["contact_id"]
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_drafts_template_id_fkey"
+            columns: ["template_id"]
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
